@@ -134,7 +134,17 @@ class WaveHyperNWStrategy(IStrategy):
                 )
             )
         )
-        trend_cond = (dataframe['trend'] == 'uptrend')
+        trend_cond = (
+            (dataframe['ema_8'] > dataframe['ema_21']) |
+            (
+                (dataframe['close'] < dataframe['nw_lower']) &
+                (dataframe['rsi'] < 40)
+            ) |
+            (
+                (dataframe['close'] < dataframe['ema_8'] * 0.995) &
+                (dataframe['volume'] > dataframe['volume_mean'])
+            )
+        )
         conditions.extend([
             wt_cond,
             volume_cond,
