@@ -134,17 +134,7 @@ class WaveHyperNWStrategy(IStrategy):
                 )
             )
         )
-        trend_cond = (
-            (dataframe['ema_8'] > dataframe['ema_21']) |
-            (
-                (dataframe['close'] < dataframe['nw_lower']) &
-                (dataframe['rsi'] < 40)
-            ) |
-            (
-                (dataframe['close'] < dataframe['ema_8'] * 0.995) &
-                (dataframe['volume'] > dataframe['volume_mean'])
-            )
-        )
+        trend_cond = (dataframe['trend'] == 'uptrend')
         conditions.extend([
             wt_cond,
             volume_cond,
@@ -161,7 +151,6 @@ class WaveHyperNWStrategy(IStrategy):
         dataframe['enter_long'] = 0
 
         # Detectar transição de "sem sinal" para "sinal de entrada"
-        # Só define enter_long = 1 se o candle anterior não tinha sinal (shift(1) == 0)
         dataframe.loc[
             entry_signal & (dataframe['enter_long'].shift(1).fillna(0) == 0),
             'enter_long'
@@ -184,6 +173,7 @@ class WaveHyperNWStrategy(IStrategy):
             )
 
         return dataframe
+
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         # Condições de saída
@@ -215,25 +205,19 @@ class WaveHyperNWStrategy(IStrategy):
         ])
         dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit_long'] = 1
         return dataframe
+
     def bot_loop_start(self, **kwargs) -> None:
-        """
-        Método chamado em cada iteração do bot.
-        Verifica se há novos sinais de entrada para cada par e envia notificações ao Telegram ou registra nos logs.
-        """
         for pair in self.dp.current_whitelist():
             dataframe, last_analyzed = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if dataframe is not None and not dataframe.empty:
                 current_time = dataframe['date'].iloc[-1]
-                # Inicializar estado para o par, se não existir
                 if pair not in self.last_entry_signal_state:
-                    self.last_entry_signal_state[pair] = 0 # Estado inicial: sem sinal
+                    self.last_entry_signal_state[pair] = 0
                 current_state = dataframe['enter_long'].iloc[-1]
                 previous_state = self.last_entry_signal_state[pair]
 
-                # Notificar apenas se houver transição de 0 para 1 (novo sinal de entrada)
                 if current_state == 1 and previous_state == 0:
                     logger.info(f"Novo sinal de entrada detectado para {pair} às {current_time}")
-
                     message = (
                         f"📈 Sinal de entrada detectado para {pair}!\n"
                         f"Data: {current_time}\n"
@@ -244,7 +228,6 @@ class WaveHyperNWStrategy(IStrategy):
                         f"Volume: {dataframe['volume'].iloc[-1]:.2f}\n"
                         f"RSI: {dataframe['rsi'].iloc[-1]:.2f}"
                     )
-
                     try:
                         self.dp.send_msg(message)
                         logger.info(f"Mensagem enviada ao Telegram: {message}")
@@ -253,17 +236,16 @@ class WaveHyperNWStrategy(IStrategy):
                 else:
                     logger.debug(f"Nenhum novo sinal de entrada para {pair} às {current_time}")
 
-                # Atualizar o estado anterior
                 self.last_entry_signal_state[pair] = current_state
 
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
                         current_rate: float, current_profit: float, **kwargs) -> float:
-        if current_profit > 0.05:  # 5%
-            return 0.03 # Stop a 3%
-        elif current_profit > 0.04:  # 4%
-            return 0.02 # Stop a 2%
-        elif current_profit > 0.03:  # 3%
-            return 0.015 # Stop a 1.5%
+        if current_profit > 0.05:
+            return 0.03
+        elif current_profit > 0.04:
+            return 0.02
+        elif current_profit > 0.03:
+            return 0.015
         trade_duration = (current_time - trade.open_date_utc).total_seconds()
         if trade_duration < 3600:
             return self.stoploss
@@ -273,4 +255,3 @@ class WaveHyperNWStrategy(IStrategy):
             return self.stoploss * 0.85
         else:
             return self.stoploss
-        return self.stoploss
